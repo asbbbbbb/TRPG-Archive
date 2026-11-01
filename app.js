@@ -401,7 +401,7 @@ async function scanFolder() {
     const foundKeys = new Set();
     const foundRows = [];
     let total = 0;
-    for (const category of categoryHandles.values()) {
+    for (const [, category] of categoryHandles.entries()) {
       const entries = await readDirectoryEntries(category.handle);
       total += entries.filter((entry) => entry.handle.kind === 'directory' && !entry.name.startsWith('.')).length;
     }
@@ -411,19 +411,19 @@ async function scanFolder() {
     let imagesUploaded = 0;
     const oversized = [];
 
-    for (const category of categoryHandles.values()) {
+    for (const [categoryCode, category] of categoryHandles.entries()) {
       const entries = await readDirectoryEntries(category.handle);
       for (const entry of entries) {
         if (entry.handle.kind !== 'directory' || entry.name.startsWith('.')) continue;
         const parsed = parseScenarioFolder(entry.name);
-        const folderKey = `${category.code}/${entry.name}`;
+        const folderKey = `${categoryCode}/${entry.name}`;
         const relativePath = `${category.name}/${entry.name}`;
         foundKeys.add(folderKey);
         const titleMatches = importedByTitle.get(normalizeTitle(parsed.title)) || [];
         const previous = byKey.get(folderKey) || (titleMatches.length === 1 ? titleMatches[0] : null);
         const metadata = {
           folder_key: folderKey,
-          category_code: category.code,
+          category_code: categoryCode,
           category_name: category.label,
           reading_initial: parsed.readingInitial,
           title: parsed.title,
