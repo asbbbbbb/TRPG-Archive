@@ -14,6 +14,7 @@ const CATEGORY_DEFS = [
 ];
 const PLAYER_OPTIONS = ['ソロ', 'タイマン', '2PL', '3PL', '4PL', '5PL', '6PL', '人数融通有'];
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif'];
+const SCENARIO_FILE_EXTENSIONS = ['pdf', 'txt', 'docx', 'doc'];
 const MAX_THUMBNAIL_BYTES = 8 * 1024 * 1024;
 
 const $ = (id) => document.getElementById(id);
@@ -141,14 +142,18 @@ function selectedPlayerFilters() {
   return [...document.querySelectorAll('input[name="players"]:checked')].map((el) => el.value);
 }
 
+function scenarioRows() {
+  return scenarios.filter((row) => row.record_type !== 'collection');
+}
+
 function filterRows() {
   const query = $('search').value.trim().toLocaleLowerCase();
   const playerFilters = selectedPlayerFilters();
   const r18Only = $('filter-r18').checked;
   const paidOnly = $('filter-paid').checked;
   const unknownOnly = $('filter-unread').checked;
-  let rows = scenarios.filter((row) => {
-    if (query && !`${row.title || ''} ${row.author_name || ''} ${row.category_name || ''}`.toLocaleLowerCase().includes(query)) return false;
+  let rows = scenarioRows().filter((row) => {
+    if (query && !`${row.title || ''} ${row.item_name || ''} ${row.collection_name || ''} ${row.author_name || ''} ${row.category_name || ''}`.toLocaleLowerCase().includes(query)) return false;
     if (currentCategory !== 'all' && row.category_code !== currentCategory) return false;
     if (currentFilter === 'favorite' && !row.is_favorite) return false;
     if (currentFilter === 'kp' && !row.kp_done) return false;
@@ -163,9 +168,10 @@ function filterRows() {
   });
   const sort = $('sort-select').value;
   rows.sort((a, b) => {
-    if (sort === 'category') return (a.category_code || '').localeCompare(b.category_code || '') || (a.title || '').localeCompare(b.title || '', 'ja');
+    if (sort === 'category') return (a.category_code || '').localeCompare(b.category_code || '') || (a.collection_name || '').localeCompare(b.collection_name || '', 'ja') || ((a.sort_order ?? 999999) - (b.sort_order ?? 999999)) || (a.title || '').localeCompare(b.title || '', 'ja');
     if (sort === 'newest') return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
     if (sort === 'players') return playerNumber(a.player_count) - playerNumber(b.player_count) || (a.title || '').localeCompare(b.title || '', 'ja');
+    if (a.collection_name && a.collection_name === b.collection_name && a.sort_order != null && b.sort_order != null) return a.sort_order - b.sort_order || (a.title || '').localeCompare(b.title || '', 'ja');
     return (a.title || '').localeCompare(b.title || '', 'ja');
   });
   return rows;
@@ -194,8 +200,9 @@ function playerNumber(value) {
 }
 
 function renderSidebarCounts() {
-  const count = (fn) => scenarios.filter(fn).length;
-  $('count-all').textContent = scenarios.length;
+  const visibleScenarios = scenarioRows();
+  const count = (fn) => visibleScenarios.filter(fn).length;
+  $('count-all').textContent = visibleScenarios.length;
   $('count-favorite').textContent = count((x) => x.is_favorite);
   $('count-kp').textContent = count((x) => x.kp_done);
   $('count-pl').textContent = count((x) => x.pl_done);
@@ -225,12 +232,12 @@ function renderCards(rows) {
     return `<article class="scenario-card" data-id="${row.id}" tabindex="0" role="button" aria-label="${escapeHtml(row.title)}の詳細">
       <div class="card-cover">${cover}<span class="cover-category">${escapeHtml(row.category_name || categoryLabel(row.category_code))}</span>${row.is_favorite ? '<span class="favorite-star">★</span>' : ''}</div>
       <div class="card-content">
-        <div class="card-meta"><span>${escapeHtml(row.reading_initial || '他')}行</span></div>
+        <div class="card-meta"><span>${row.reading_initial && row.reading_initial !== '他' ? `${escapeHtml(row.reading_initial)}行` : 'かな未設定'}</span></div>
         <div class="card-player-types">${getPlayerTypes(row.player_count).map((item) => `<span class="chip player">${escapeHtml(item)}</span>`).join('') || '<span class="muted small-text">人数未確認</span>'}</div>
         <h2 class="card-title">${escapeHtml(row.title)}</h2>
         <div class="card-author">${row.author_name ? `サークル：${escapeHtml(row.author_name)}` : 'サークル名未登録'}</div>
         <div class="chips">${chips.join('')}</div>
-        <div class="card-footer"><span>${escapeHtml(row.folder_name || '')}</span><span>${row.folder_exists === false ? '未検出' : 'フォルダあり'}</span></div>
+        <div class="card-footer"><span>${escapeHtml(row.collection_name ? `所属：${row.collection_name}` : (row.folder_name || ''))}</span><span>${row.folder_exists === false ? '未検出' : '保存あり'}</span></div>
       </div>
     </article>`;
   }).join('');
@@ -240,11 +247,12 @@ function render() {
   renderSidebarCounts();
   const rows = filterRows();
   $('page-title').textContent = currentFilter === 'all' ? (currentCategory === 'all' ? 'すべてのシナリオ' : categoryLabel(currentCategory)) : ({ favorite: 'お気に入り', kp: 'KP済み', pl: 'PL済み', unread: '未読', missing: 'フォルダ未検出' }[currentFilter]);
-  $('page-subtitle').textContent = `${rows.length}件 / 登録 ${scenarios.length}件`;
+  $('page-subtitle').textContent = `${rows.length}件 / 登録 ${scenarioRows().length}件`; 
   $('mobile-count').textContent = `${rows.length}件`;
-  $('empty-state').classList.toggle('hidden', scenarios.length > 0);
-  $('scenario-grid').classList.toggle('hidden', scenarios.length === 0 || rows.length === 0);
-  $('no-results').classList.toggle('hidden', scenarios.length === 0 || rows.length > 0);
+  const visibleCount = scenarioRows().length;
+  $('empty-state').classList.toggle('hidden', visibleCount > 0);
+  $('scenario-grid').classList.toggle('hidden', visibleCount === 0 || rows.length === 0);
+  $('no-results').classList.toggle('hidden', visibleCount === 0 || rows.length > 0);
   renderCards(rows);
 }
 
@@ -320,13 +328,60 @@ async function readDirectoryEntries(directoryHandle) {
   return entries;
 }
 
-function parseScenarioFolder(folderName) {
-  const indexes = ['＿', '_'].map((separator) => folderName.indexOf(separator)).filter((index) => index > 0);
-  if (!indexes.length) return { readingInitial: '他', title: folderName.trim() };
-  const index = Math.min(...indexes);
-  const reading = folderName.slice(0, index).trim();
-  const title = folderName.slice(index + 1).trim();
-  return { readingInitial: Array.from(reading)[0] || '他', title: title || folderName };
+function stripExtension(name) {
+  const index = name.lastIndexOf('.');
+  return index > 0 ? name.slice(0, index) : name;
+}
+
+// 「かな_タイトル」および「連番_タイトル」の両方を解析する。
+function parseCatalogName(rawName) {
+  const base = stripExtension(String(rawName || '').trim());
+  const match = base.match(/^(.+?)[_＿](.+)$/);
+  if (!match) return { itemName: base, readingInitial: '', sequence: null };
+  const prefix = match[1].trim();
+  const itemName = match[2].trim() || base;
+  if (/^\d+$/.test(prefix)) {
+    return { itemName, readingInitial: '', sequence: Number(prefix) };
+  }
+  // かなの読み一文字目が先頭に付く従来形式。
+  return { itemName, readingInitial: Array.from(prefix)[0] || '', sequence: null };
+}
+
+function isAncillaryDocument(name) {
+  const base = stripExtension(name).normalize('NFKC').toLowerCase().replace(/^[0-9]+[_＿-]?/, '').replace(/[ _＿　-]/g, '');
+  return /^(readme|readme.*|readme.*|お読みください|はじめに|あとがき|奥付|目次|利用規約|利用ガイド|contents|tableofcontents|license|licence|info)$/.test(base);
+}
+
+function isScenarioDocument(name) {
+  const ext = name.split('.').pop()?.toLowerCase();
+  return SCENARIO_FILE_EXTENSIONS.includes(ext) && !isAncillaryDocument(name);
+}
+
+function candidateIdentity(parsed) {
+  const normalized = normalizeTitle(parsed.itemName);
+  return parsed.sequence === null ? `name:${normalized}` : `number:${parsed.sequence}:${normalized}`;
+}
+
+function relativeJoin(...parts) {
+  return parts.filter(Boolean).join('/').replace(/\\/g, '/');
+}
+
+function imageMatchesItem(imageName, itemName) {
+  const imageBase = normalizeTitle(stripExtension(imageName));
+  const itemBase = normalizeTitle(itemName);
+  return itemBase.length >= 2 && imageBase.includes(itemBase);
+}
+
+async function collectFolderFiles(directoryHandle, relativePrefix) {
+  const paths = [];
+  for (const entry of await readDirectoryEntries(directoryHandle)) {
+    if (entry.handle.kind !== 'file' || entry.name.startsWith('.')) continue;
+    const ext = entry.name.split('.').pop()?.toLowerCase();
+    if (SCENARIO_FILE_EXTENSIONS.includes(ext) || IMAGE_EXTENSIONS.includes(ext)) {
+      if (!isAncillaryDocument(entry.name)) paths.push(relativeJoin(relativePrefix, entry.name));
+    }
+  }
+  return paths;
 }
 
 async function findThumbnail(directoryHandle) {
@@ -374,6 +429,31 @@ async function uploadThumbnail(row, imageInfo) {
   return data;
 }
 
+async function saveScannedRow(metadata, previous) {
+  if (previous) {
+    const { data, error } = await supabase.from(TABLE).update(metadata)
+      .eq('id', previous.id).eq('user_id', currentUser.id).select().single();
+    if (error) throw error;
+    return { row: data, created: false };
+  }
+  const { data, error } = await supabase.from(TABLE).insert({
+    ...metadata,
+    user_id: currentUser.id,
+    kp_done: false,
+    pl_done: false,
+    read_status: '未読',
+    r_rating: '未確認',
+    player_count: '',
+    paid_status: '未確認',
+    author_name: '',
+    url: '',
+    memo: '',
+    is_favorite: false
+  }).select().single();
+  if (error) throw error;
+  return { row: data, created: true };
+}
+
 async function scanFolder() {
   if (!rootHandle || !currentUser) return;
   const permission = await getFolderPermission(rootHandle);
@@ -383,32 +463,23 @@ async function scanFolder() {
   }
   $('scan-btn').disabled = true;
   $('mobile-scan-btn').disabled = true;
-  setNotice('フォルダを読み込んでいます。既存のKP/PL・既読・メモなどは上書きしません。');
+  setNotice('フォルダを読み込んでいます。親フォルダと個別シナリオを分けて判定します。既存のプレイ状況・CSV情報は保持します。');
   setProgress(2);
+
   try {
     const rootEntries = await readDirectoryEntries(rootHandle);
     const categoryHandles = new Map();
     const ignoredRootFolders = [];
     const SCANNABLE_CATEGORY_CODES = new Set(['00', '01', '02', '03', '04', '05']);
+
     for (const entry of rootEntries) {
       if (entry.handle.kind !== 'directory') continue;
       const match = entry.name.match(/^(\d{2})[_＿](.+)$/);
-      if (!match) {
-        // 直下の通常フォルダは分類フォルダではないため対象外
-        ignoredRootFolders.push(entry.name);
-        continue;
-      }
+      if (!match) { ignoredRootFolders.push(entry.name); continue; }
       const code = match[1];
-      // 99_未整理 は現在の6分類に含めない。CSV取込用の仮分類(99)とも区別する。
-      if (!SCANNABLE_CATEGORY_CODES.has(code)) {
-        ignoredRootFolders.push(entry.name);
-        continue;
-      }
+      if (!SCANNABLE_CATEGORY_CODES.has(code)) { ignoredRootFolders.push(entry.name); continue; }
       const def = CATEGORY_DEFS.find((category) => category.code === code && category.code !== '99');
-      if (!def) {
-        ignoredRootFolders.push(entry.name);
-        continue;
-      }
+      if (!def) { ignoredRootFolders.push(entry.name); continue; }
       categoryHandles.set(def.code, { code: def.code, handle: entry.handle, name: entry.name, label: def.name });
     }
     if (!categoryHandles.size) throw new Error('直下に 00_公式シナリオ ～ 05_企画 のフォルダが見つかりません。選択した場所を確認してください。');
@@ -418,80 +489,258 @@ async function scanFolder() {
     const existing = existingResult.data || [];
     const byKey = new Map(existing.map((row) => [row.folder_key, row]));
     const importedByTitle = new Map();
-    for (const row of existing.filter((item) => item.category_code === '99')) {
-      const key = normalizeTitle(row.title);
-      if (!importedByTitle.has(key)) importedByTitle.set(key, []);
-      importedByTitle.get(key).push(row);
+    for (const row of existing.filter((item) => item.category_code === '99' && item.record_type !== 'collection')) {
+      for (const title of [row.title, row.item_name].filter(Boolean)) {
+        const key = normalizeTitle(title);
+        if (!importedByTitle.has(key)) importedByTitle.set(key, []);
+        if (!importedByTitle.get(key).some((candidate) => candidate.id === row.id)) importedByTitle.get(key).push(row);
+      }
     }
+
     const foundKeys = new Set();
-    const foundRows = [];
-    let total = 0;
+    let estimated = 0;
     for (const [, category] of categoryHandles.entries()) {
-      const entries = await readDirectoryEntries(category.handle);
-      total += entries.filter((entry) => entry.handle.kind === 'directory' && !entry.name.startsWith('.')).length;
+      const topEntries = await readDirectoryEntries(category.handle);
+      if (['00', '03'].includes(category.code)) {
+        estimated += topEntries.filter((entry) => entry.handle.kind === 'directory' && !entry.name.startsWith('.')).length;
+      } else {
+        for (const parent of topEntries.filter((entry) => entry.handle.kind === 'directory' && !entry.name.startsWith('.'))) {
+          estimated += 1;
+          const inner = await readDirectoryEntries(parent.handle);
+          estimated += inner.filter((entry) => entry.handle.kind === 'directory' || (entry.handle.kind === 'file' && isScenarioDocument(entry.name))).length;
+        }
+      }
     }
+
     let completed = 0;
     let created = 0;
     let updated = 0;
+    let collections = 0;
+    let createdCollections = 0;
+    let updatedCollections = 0;
     let imagesUploaded = 0;
+    let pairedFileSets = 0;
+    let ignoredItems = 0;
     const oversized = [];
 
-    for (const [, category] of categoryHandles.entries()) {
+    async function commitScenario({ category, collectionName = '', itemName, readingInitial = '', sequence = null,
+      folderName, relativePath, folderHandle = null, relatedFiles = [], sourceKey, displayTitle }) {
       const categoryCode = category.code;
-      if (!['00', '01', '02', '03', '04', '05'].includes(categoryCode)) {
-        throw new Error(`分類コード「${categoryCode}」が不正です。00～05の分類フォルダだけをスキャンできます。`);
+      const folderKey = sourceKey;
+      foundKeys.add(folderKey);
+      const metadata = {
+        record_type: 'scenario',
+        folder_key: folderKey,
+        category_code: categoryCode,
+        category_name: category.label,
+        collection_name: collectionName,
+        item_name: itemName,
+        sort_order: Number.isInteger(sequence) ? sequence : null,
+        reading_initial: readingInitial || '',
+        title: displayTitle,
+        folder_name: folderName,
+        relative_path: relativePath,
+        related_files: [...new Set(relatedFiles)].sort((a, b) => a.localeCompare(b, 'ja')),
+        folder_exists: true
+      };
+      const matches = [itemName, displayTitle].map(normalizeTitle).flatMap((key) => importedByTitle.get(key) || []);
+      const uniqueMatches = [...new Map(matches.map((row) => [row.id, row])).values()];
+      const previous = byKey.get(folderKey) || (uniqueMatches.length === 1 ? uniqueMatches[0] : null);
+      if (categoryCode === '01' && !previous?.author_name && collectionName) {
+        const campaignRecord = byKey.get(`${categoryCode}/${collectionName}`);
+        if (campaignRecord?.author_name) metadata.author_name = campaignRecord.author_name;
       }
-      const entries = await readDirectoryEntries(category.handle);
-      for (const entry of entries) {
-        if (entry.handle.kind !== 'directory' || entry.name.startsWith('.')) continue;
-        const parsed = parseScenarioFolder(entry.name);
-        const folderKey = `${categoryCode}/${entry.name}`;
-        const relativePath = `${category.name}/${entry.name}`;
-        foundKeys.add(folderKey);
-        const titleMatches = importedByTitle.get(normalizeTitle(parsed.title)) || [];
-        const previous = byKey.get(folderKey) || (titleMatches.length === 1 ? titleMatches[0] : null);
-        const metadata = {
-          folder_key: folderKey,
-          category_code: categoryCode,
-          category_name: category.label,
-          reading_initial: parsed.readingInitial,
-          title: parsed.title,
-          folder_name: entry.name,
-          relative_path: relativePath,
-          folder_exists: true
-        };
-        let row;
-        if (previous) {
-          const { data, error } = await supabase.from(TABLE).update(metadata).eq('id', previous.id).eq('user_id', currentUser.id).select().single();
-          if (error) throw error;
-          row = data;
-          updated++;
-        } else {
-          const { data, error } = await supabase.from(TABLE).insert({
-            ...metadata,
-            user_id: currentUser.id,
-            kp_done: false,
-            pl_done: false,
-            read_status: '未読',
-            r_rating: '未確認',
-            player_count: '',
-            paid_status: '未確認',
-            is_favorite: false
-          }).select().single();
-          if (error) throw error;
-          row = data;
-          created++;
+      const result = await saveScannedRow(metadata, previous);
+      byKey.set(folderKey, result.row);
+      if (result.created) created++; else updated++;
+
+      let imageInfo = null;
+      if (folderHandle) imageInfo = await findThumbnail(folderHandle);
+      if (!imageInfo && collectionName && !folderHandle) {
+        // sibling images are checked by the caller and passed using a lightweight lookup below.
+      }
+      if (imageInfo?.tooLarge) oversized.push(`${displayTitle}（${(imageInfo.size / 1024 / 1024).toFixed(1)}MB）`);
+      if (imageInfo && !imageInfo.tooLarge) {
+        const changed = result.row.thumbnail_filename !== imageInfo.name || Number(result.row.thumbnail_last_modified) !== Number(imageInfo.lastModified) || !result.row.thumbnail_object_path;
+        await uploadThumbnail(result.row, imageInfo);
+        if (changed) imagesUploaded++;
+      }
+      completed++;
+      setProgress(estimated ? 5 + (completed / estimated) * 90 : 95);
+    }
+
+    async function commitCollection(category, parentEntry) {
+      const collectionKey = `${category.code}/${parentEntry.name}`;
+      const collectionTitle = parseCatalogName(parentEntry.name).itemName;
+      foundKeys.add(collectionKey);
+      const relativePath = relativeJoin(category.name, parentEntry.name);
+      const metadata = {
+        record_type: 'collection',
+        folder_key: collectionKey,
+        category_code: category.code,
+        category_name: category.label,
+        collection_name: collectionTitle,
+        item_name: '',
+        sort_order: null,
+        reading_initial: '',
+        title: collectionTitle,
+        folder_name: parentEntry.name,
+        relative_path: relativePath,
+        related_files: [],
+        folder_exists: true
+      };
+      const previous = byKey.get(collectionKey);
+      const result = await saveScannedRow(metadata, previous);
+      byKey.set(collectionKey, result.row);
+      if (result.created) { created++; createdCollections++; } else { updated++; updatedCollections++; }
+      collections++;
+      completed++;
+      setProgress(estimated ? 5 + (completed / estimated) * 90 : 95);
+    }
+
+    // 00・03は直下が個別シナリオ。01・02・04・05は親フォルダの中を解析する。
+    for (const [, category] of categoryHandles.entries()) {
+      const topEntries = await readDirectoryEntries(category.handle);
+
+      if (['00', '03'].includes(category.code)) {
+        for (const entry of topEntries) {
+          if (entry.handle.kind !== 'directory' || entry.name.startsWith('.')) continue;
+          const parsed = parseCatalogName(entry.name);
+          const relativePath = relativeJoin(category.name, entry.name);
+          const relatedFiles = await collectFolderFiles(entry.handle, relativePath);
+          await commitScenario({
+            category,
+            itemName: parsed.itemName,
+            readingInitial: parsed.readingInitial,
+            sequence: parsed.sequence,
+            folderName: entry.name,
+            relativePath,
+            folderHandle: entry.handle,
+            relatedFiles,
+            sourceKey: `${category.code}/${entry.name}`,
+            displayTitle: parsed.itemName
+          });
         }
-        const imageInfo = await findThumbnail(entry.handle);
-        if (imageInfo?.tooLarge) oversized.push(`${entry.name}（${(imageInfo.size / 1024 / 1024).toFixed(1)}MB）`);
-        if (imageInfo && !imageInfo.tooLarge) {
-          const changed = row.thumbnail_filename !== imageInfo.name || Number(row.thumbnail_last_modified) !== Number(imageInfo.lastModified) || !row.thumbnail_object_path;
-          row = await uploadThumbnail(row, imageInfo);
-          if (changed) imagesUploaded++;
+        continue;
+      }
+
+      for (const parentEntry of topEntries) {
+        if (parentEntry.handle.kind !== 'directory' || parentEntry.name.startsWith('.')) continue;
+        await commitCollection(category, parentEntry);
+        const innerEntries = await readDirectoryEntries(parentEntry.handle);
+        const collectionTitle = parseCatalogName(parentEntry.name).itemName;
+        const candidates = new Map();
+        const siblingImages = [];
+        const parentPath = relativeJoin(category.name, parentEntry.name);
+
+        function addCandidate(parsed, sourceEntry, kind) {
+          const key = candidateIdentity(parsed);
+          if (!parsed.itemName || !key) return;
+          if (parsed.sequence === 0 && normalizeTitle(parsed.itemName) === normalizeTitle(collectionTitle)) return;
+          if (!candidates.has(key)) {
+            candidates.set(key, {
+              key,
+              itemName: parsed.itemName,
+              readingInitial: parsed.readingInitial,
+              sequence: parsed.sequence,
+              folderEntry: null,
+              docEntries: [],
+              paths: []
+            });
+          }
+          const candidate = candidates.get(key);
+          if (kind === 'directory') {
+            candidate.folderEntry = sourceEntry;
+            candidate.paths.push(relativeJoin(parentPath, sourceEntry.name));
+          } else {
+            candidate.docEntries.push(sourceEntry);
+            candidate.paths.push(relativeJoin(parentPath, sourceEntry.name));
+          }
         }
-        foundRows.push(row);
-        completed++;
-        setProgress(total ? 5 + (completed / total) * 90 : 95);
+
+        for (const inner of innerEntries) {
+          if (inner.name.startsWith('.')) continue;
+          if (inner.handle.kind === 'directory') {
+            if (/^(素材|画像|地図|資料|maps?|images?|assets?)$/i.test(inner.name)) { ignoredItems++; continue; }
+            addCandidate(parseCatalogName(inner.name), inner, 'directory');
+          } else {
+            const ext = inner.name.split('.').pop()?.toLowerCase();
+            if (IMAGE_EXTENSIONS.includes(ext)) {
+              siblingImages.push(inner);
+              continue;
+            }
+            if (!isScenarioDocument(inner.name)) { ignoredItems++; continue; }
+            addCandidate(parseCatalogName(inner.name), inner, 'file');
+          }
+        }
+
+        const sortedCandidates = [...candidates.values()].sort((a, b) => {
+          const aOrder = Number.isInteger(a.sequence) ? a.sequence : Number.MAX_SAFE_INTEGER;
+          const bOrder = Number.isInteger(b.sequence) ? b.sequence : Number.MAX_SAFE_INTEGER;
+          return aOrder - bOrder || a.itemName.localeCompare(b.itemName, 'ja');
+        });
+
+        for (const candidate of sortedCandidates) {
+          const folderPath = candidate.folderEntry ? relativeJoin(parentPath, candidate.folderEntry.name) : parentPath;
+          const relatedFiles = [...candidate.paths];
+          if (candidate.folderEntry) {
+            relatedFiles.push(...await collectFolderFiles(candidate.folderEntry.handle, folderPath));
+          }
+
+          // 同一タイトルを含む画像は関連資料として紐付ける。地図画像はサムネイルにはしない。
+          for (const imageEntry of siblingImages) {
+            if (imageMatchesItem(imageEntry.name, candidate.itemName)) {
+              relatedFiles.push(relativeJoin(parentPath, imageEntry.name));
+            }
+          }
+
+          let imageInfo = candidate.folderEntry ? await findThumbnail(candidate.folderEntry.handle) : null;
+          if (!imageInfo) {
+            const matchingCovers = siblingImages.filter((imageEntry) => imageMatchesItem(imageEntry.name, candidate.itemName) && !/地図|map|立ち絵|背景|素材|token/i.test(imageEntry.name));
+            matchingCovers.sort((a, b) => {
+              const priority = (name) => /サムネ|表紙|cover|thumbnail|thumb/i.test(name) ? 0 : 1;
+              return priority(a.name) - priority(b.name) || a.name.localeCompare(b.name, 'ja');
+            });
+            if (matchingCovers.length) {
+              const file = await matchingCovers[0].handle.getFile();
+              imageInfo = file.size > MAX_THUMBNAIL_BYTES
+                ? { tooLarge: true, name: file.name, size: file.size }
+                : { file, name: file.name, lastModified: file.lastModified };
+            }
+          }
+
+          const displayTitle = category.code === '01'
+            ? `${collectionTitle} - ${candidate.itemName}`
+            : candidate.itemName;
+          const itemStorageKey = encodeURIComponent(candidate.key);
+          const folderKey = `${category.code}/${parentEntry.name}/items/${itemStorageKey}`;
+          await commitScenario({
+            category,
+            collectionName: collectionTitle,
+            itemName: candidate.itemName,
+            readingInitial: candidate.readingInitial,
+            sequence: candidate.sequence,
+            folderName: candidate.folderEntry?.name || candidate.docEntries[0]?.name || candidate.itemName,
+            relativePath: folderPath,
+            folderHandle: candidate.folderEntry?.handle || null,
+            relatedFiles,
+            sourceKey: folderKey,
+            displayTitle
+          });
+          // ファイル形式のみの作品は、同名PDF/TXT/DOCXを1件にまとめる。
+          if (candidate.docEntries.length > 1) pairedFileSets++;
+
+          // フォルダがないファイル型の作品は、親フォルダの同名表紙画像をサムネイル登録する。
+          if (!candidate.folderEntry && imageInfo) {
+            const row = byKey.get(folderKey);
+            if (imageInfo.tooLarge) oversized.push(`${displayTitle}（${(imageInfo.size / 1024 / 1024).toFixed(1)}MB）`);
+            else {
+              const changed = row.thumbnail_filename !== imageInfo.name || Number(row.thumbnail_last_modified) !== Number(imageInfo.lastModified) || !row.thumbnail_object_path;
+              await uploadThumbnail(row, imageInfo);
+              if (changed) imagesUploaded++;
+            }
+          }
+        }
       }
     }
 
@@ -506,9 +755,11 @@ async function scanFolder() {
     const ignoredMessage = ignoredRootFolders.length
       ? ` 対象外の直下フォルダ（${ignoredRootFolders.join('、')}）はスキャンしていません。`
       : '';
-    const message = `スキャン完了：新規 ${created}件、既存更新 ${updated}件、フォルダ未検出 ${missing.length}件、サムネイル更新 ${imagesUploaded}件。KP/PL・既読・サークル名・URL・メモは保持しました。${ignoredMessage}`;
+    const scenarioCreated = created - createdCollections;
+    const scenarioUpdated = updated - updatedCollections;
+    const message = `スキャン完了：個別シナリオ新規 ${scenarioCreated}件・更新 ${scenarioUpdated}件、所属フォルダ ${collections}件、フォルダ未検出 ${missing.length}件、サムネイル更新 ${imagesUploaded}件。同名PDF/TXT等は同一作品にまとめました。プレイ状況・CSV情報は保持しました。${pairedFileSets ? ` 複数形式をまとめた作品：${pairedFileSets}件。` : ''}${ignoredItems ? ` 対象外ファイル等：${ignoredItems}件。` : ''}${ignoredMessage}`;
     setNotice(message);
-    if (oversized.length) setNotice(`${message} 8MBを超えるためサムネイルを取り込まなかったフォルダ：${oversized.slice(0, 5).join('、')}`, 'warn');
+    if (oversized.length) setNotice(`${message} 8MBを超えるためサムネイルを取り込まなかった項目：${oversized.slice(0, 5).join('、')}`, 'warn');
     showToast('フォルダのスキャンが完了しました');
   } catch (error) {
     console.error(error);
@@ -525,7 +776,8 @@ function openDetails(id) {
   if (!row) return;
   currentEditingId = id;
   $('detail-title').textContent = row.title;
-  $('detail-path').textContent = `保存場所：${row.relative_path || '未登録'} / 分類：${row.category_name || categoryLabel(row.category_code)} / かな：${row.reading_initial || '他'}`;
+  const relatedNames = Array.isArray(row.related_files) ? row.related_files.map((path) => String(path).split('/').pop()).join('、') : '';
+  $('detail-path').textContent = `保存場所：${row.relative_path || '未登録'} / 分類：${row.category_name || categoryLabel(row.category_code)}${row.collection_name ? ` / 所属：${row.collection_name}` : ''} / かな：${row.reading_initial || '未設定'}${relatedNames ? ` / 関連ファイル：${relatedNames}` : ''}`;
   const selectedPlayers = new Set(getPlayerTypes(row.player_count));
   document.querySelectorAll('input[name="edit-players"]').forEach((el) => { el.checked = selectedPlayers.has(el.value); });
   $('edit-r18').value = row.r_rating || '未確認';
@@ -758,10 +1010,12 @@ async function importCsvFile(event) {
     const { data: existing, error: fetchError } = await supabase.from(TABLE).select('*').eq('user_id', currentUser.id).range(0, 4999);
     if (fetchError) throw fetchError;
     const byTitle = new Map();
-    for (const row of existing || []) {
-      const key = normalizeTitle(row.title);
-      if (!byTitle.has(key)) byTitle.set(key, []);
-      byTitle.get(key).push(row);
+    for (const row of (existing || []).filter((item) => item.record_type !== 'collection')) {
+      for (const sourceTitle of [row.title, row.item_name].filter(Boolean)) {
+        const key = normalizeTitle(sourceTitle);
+        if (!byTitle.has(key)) byTitle.set(key, []);
+        if (!byTitle.get(key).some((candidate) => candidate.id === row.id)) byTitle.get(key).push(row);
+      }
     }
     let updated = 0;
     let created = 0;
@@ -785,6 +1039,11 @@ async function importCsvFile(event) {
         const folderKey = `csv/${crypto.randomUUID()}`;
         const payload = {
           user_id: currentUser.id,
+          record_type: 'scenario',
+          collection_name: '',
+          item_name: item.title,
+          sort_order: null,
+          related_files: [],
           folder_key: folderKey,
           category_code: '99',
           category_name: '未分類（CSV取込）',
