@@ -12,6 +12,7 @@ const CATEGORY_DEFS = [
   { code: '05', name: '企画' },
   { code: '99', name: '未分類（CSV取込）' }
 ];
+const PLAYER_OPTIONS = ['ソロ', 'タイマン', '2PL', '3PL', '4PL', '5PL', '6PL', '人数融通有'];
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif'];
 const MAX_THUMBNAIL_BYTES = 8 * 1024 * 1024;
 
@@ -154,7 +155,7 @@ function filterRows() {
     if (currentFilter === 'pl' && !row.pl_done) return false;
     if (currentFilter === 'unread' && row.read_status !== '未読') return false;
     if (currentFilter === 'missing' && row.folder_exists !== false) return false;
-    if (playerFilters.length && !playerFilters.some((value) => playerMatches(row.player_count, value))) return false;
+    if (playerFilters.length && !playerFilters.some((value) => getPlayerTypes(row.player_count).includes(value))) return false;
     if (r18Only && row.r_rating !== 'あり') return false;
     if (paidOnly && row.paid_status !== '有償') return false;
     if (unknownOnly && !(row.r_rating === '未確認' || row.paid_status === '未確認' || !row.player_count)) return false;
@@ -170,19 +171,26 @@ function filterRows() {
   return rows;
 }
 
-function playerNumber(value) {
-  if (!value) return 999;
-  if (/ソロ|1PL/i.test(value)) return 1;
-  const match = String(value).match(/\d+/);
-  return match ? Number(match[0]) : 998;
+function getPlayerTypes(value) {
+  if (Array.isArray(value)) return value.filter((item) => PLAYER_OPTIONS.includes(item));
+  const raw = String(value || '').trim();
+  if (!raw) return [];
+  const normalized = raw.normalize('NFKC').replace(/[、，,;；|／/・\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const found = [];
+  for (const option of PLAYER_OPTIONS) {
+    const pattern = option === '人数融通有'
+      ? /人数\s*融通\s*(有|あり|可)/i
+      : new RegExp(option.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    if (pattern.test(normalized) || (option === '人数融通有' && /人数融通/.test(normalized))) found.push(option);
+  }
+  return found;
 }
 
-function playerMatches(value, filter) {
-  if (!value) return false;
-  const text = String(value).toUpperCase().replace(/\s/g, '');
-  if (filter === 'ソロ') return /ソロ|1PL/.test(text);
-  if (filter === '5PL以上') return /5PL|6PL|7PL|8PL|9PL|10PL/.test(text) || Number((text.match(/\d+/) || [0])[0]) >= 5;
-  return text.includes(filter.toUpperCase());
+function playerNumber(value) {
+  const types = getPlayerTypes(value);
+  if (!types.length) return 999;
+  const order = ['ソロ', 'タイマン', '2PL', '3PL', '4PL', '5PL', '6PL', '人数融通有'];
+  return Math.min(...types.map((item) => order.indexOf(item)).filter((n) => n >= 0));
 }
 
 function renderSidebarCounts() {
@@ -217,9 +225,10 @@ function renderCards(rows) {
     return `<article class="scenario-card" data-id="${row.id}" tabindex="0" role="button" aria-label="${escapeHtml(row.title)}の詳細">
       <div class="card-cover">${cover}<span class="cover-category">${escapeHtml(row.category_name || categoryLabel(row.category_code))}</span>${row.is_favorite ? '<span class="favorite-star">★</span>' : ''}</div>
       <div class="card-content">
-        <div class="card-meta"><span>${escapeHtml(row.reading_initial || '他')}行</span><span>•</span><span>${escapeHtml(row.player_count || '人数未確認')}</span></div>
+        <div class="card-meta"><span>${escapeHtml(row.reading_initial || '他')}行</span></div>
+        <div class="card-player-types">${getPlayerTypes(row.player_count).map((item) => `<span class="chip player">${escapeHtml(item)}</span>`).join('') || '<span class="muted small-text">人数未確認</span>'}</div>
         <h2 class="card-title">${escapeHtml(row.title)}</h2>
-        <div class="card-author">${row.author_name ? `作者：${escapeHtml(row.author_name)}` : '作者未登録'}</div>
+        <div class="card-author">${row.author_name ? `サークル：${escapeHtml(row.author_name)}` : 'サークル名未登録'}</div>
         <div class="chips">${chips.join('')}</div>
         <div class="card-footer"><span>${escapeHtml(row.folder_name || '')}</span><span>${row.folder_exists === false ? '未検出' : 'フォルダあり'}</span></div>
       </div>
@@ -379,12 +388,28 @@ async function scanFolder() {
   try {
     const rootEntries = await readDirectoryEntries(rootHandle);
     const categoryHandles = new Map();
+    const ignoredRootFolders = [];
+    const SCANNABLE_CATEGORY_CODES = new Set(['00', '01', '02', '03', '04', '05']);
     for (const entry of rootEntries) {
       if (entry.handle.kind !== 'directory') continue;
       const match = entry.name.match(/^(\d{2})[_＿](.+)$/);
-      if (!match) continue;
-      const def = CATEGORY_DEFS.find((category) => category.code === match[1]);
-      if (def) categoryHandles.set(def.code, { handle: entry.handle, name: entry.name, label: def.name });
+      if (!match) {
+        // 直下の通常フォルダは分類フォルダではないため対象外
+        ignoredRootFolders.push(entry.name);
+        continue;
+      }
+      const code = match[1];
+      // 99_未整理 は現在の6分類に含めない。CSV取込用の仮分類(99)とも区別する。
+      if (!SCANNABLE_CATEGORY_CODES.has(code)) {
+        ignoredRootFolders.push(entry.name);
+        continue;
+      }
+      const def = CATEGORY_DEFS.find((category) => category.code === code && category.code !== '99');
+      if (!def) {
+        ignoredRootFolders.push(entry.name);
+        continue;
+      }
+      categoryHandles.set(def.code, { code: def.code, handle: entry.handle, name: entry.name, label: def.name });
     }
     if (!categoryHandles.size) throw new Error('直下に 00_公式シナリオ ～ 05_企画 のフォルダが見つかりません。選択した場所を確認してください。');
 
@@ -411,7 +436,11 @@ async function scanFolder() {
     let imagesUploaded = 0;
     const oversized = [];
 
-    for (const [categoryCode, category] of categoryHandles.entries()) {
+    for (const [, category] of categoryHandles.entries()) {
+      const categoryCode = category.code;
+      if (!['00', '01', '02', '03', '04', '05'].includes(categoryCode)) {
+        throw new Error(`分類コード「${categoryCode}」が不正です。00～05の分類フォルダだけをスキャンできます。`);
+      }
       const entries = await readDirectoryEntries(category.handle);
       for (const entry of entries) {
         if (entry.handle.kind !== 'directory' || entry.name.startsWith('.')) continue;
@@ -474,7 +503,10 @@ async function scanFolder() {
 
     setProgress(100);
     await loadScenarios();
-    const message = `スキャン完了：新規 ${created}件、既存更新 ${updated}件、フォルダ未検出 ${missing.length}件、サムネイル更新 ${imagesUploaded}件。KP/PL・既読・作者名・URL・メモは保持しました。`;
+    const ignoredMessage = ignoredRootFolders.length
+      ? ` 対象外の直下フォルダ（${ignoredRootFolders.join('、')}）はスキャンしていません。`
+      : '';
+    const message = `スキャン完了：新規 ${created}件、既存更新 ${updated}件、フォルダ未検出 ${missing.length}件、サムネイル更新 ${imagesUploaded}件。KP/PL・既読・サークル名・URL・メモは保持しました。${ignoredMessage}`;
     setNotice(message);
     if (oversized.length) setNotice(`${message} 8MBを超えるためサムネイルを取り込まなかったフォルダ：${oversized.slice(0, 5).join('、')}`, 'warn');
     showToast('フォルダのスキャンが完了しました');
@@ -494,7 +526,8 @@ function openDetails(id) {
   currentEditingId = id;
   $('detail-title').textContent = row.title;
   $('detail-path').textContent = `保存場所：${row.relative_path || '未登録'} / 分類：${row.category_name || categoryLabel(row.category_code)} / かな：${row.reading_initial || '他'}`;
-  $('edit-players').value = row.player_count || '';
+  const selectedPlayers = new Set(getPlayerTypes(row.player_count));
+  document.querySelectorAll('input[name="edit-players"]').forEach((el) => { el.checked = selectedPlayers.has(el.value); });
   $('edit-r18').value = row.r_rating || '未確認';
   $('edit-paid').value = row.paid_status || '未確認';
   $('edit-read').value = row.read_status || '未読';
@@ -511,7 +544,7 @@ function openDetails(id) {
 async function saveDetails() {
   if (!currentEditingId) return;
   const updates = {
-    player_count: $('edit-players').value.trim(),
+    player_count: PLAYER_OPTIONS.filter((option) => document.querySelector(`input[name="edit-players"][value="${option}"]`)?.checked).join('、'),
     r_rating: $('edit-r18').value,
     paid_status: $('edit-paid').value,
     read_status: $('edit-read').value,
@@ -564,80 +597,144 @@ function parseCsvText(text) {
 }
 
 function headerKey(value) {
-  return String(value || '').normalize('NFKC').replace(/[\s　（）()・]/g, '').toLowerCase();
+  return String(value || '').normalize('NFKC').replace(/[\s　（）()・＿_：:]/g, '').toLowerCase();
+}
+
+function findCsvColumn(record, aliases) {
+  const targets = aliases.map(headerKey);
+  return Object.keys(record).find((candidate) => targets.includes(headerKey(candidate)));
 }
 
 function hasCsvColumn(record, aliases) {
-  const targets = aliases.map(headerKey);
-  return Object.keys(record).some((candidate) => targets.includes(headerKey(candidate)));
+  return findCsvColumn(record, aliases) !== undefined;
 }
 
 function findCsvValue(record, aliases) {
-  for (const alias of aliases) {
-    const target = headerKey(alias);
-    const key = Object.keys(record).find((candidate) => headerKey(candidate) === target);
-    if (key !== undefined) return record[key];
-  }
-  return '';
+  const key = findCsvColumn(record, aliases);
+  return key === undefined ? '' : record[key];
 }
 
 function parseChecked(value) {
-  const v = String(value || '').trim().toLowerCase();
-  if (!v) return false;
-  return /^(1|true|yes|y|あり|有償|有|済|○|〇|✓|✔|☑|チェック)$/i.test(v) || /kp済|pl済|既読/.test(v);
+  const v = String(value ?? '').trim().toLowerCase();
+  if (!v) return null;
+  if (/^(0|false|no|n|なし|無償|未|未読|×|✕)$/i.test(v)) return false;
+  if (/^(1|true|yes|y|あり|有償|有|済|○|〇|✓|✔|☑|チェック)$/i.test(v)) return true;
+  return /kp済|pl済|既読/.test(v) ? true : null;
+}
+
+function parsePlayerTypes(value) {
+  const text = String(value || '').normalize('NFKC').replace(/[\r\n、，,;；|／/・]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!text) return [];
+  const aliases = [
+    ['ソロ', /(^|\s)(ソロ|1PL|1人)(?=\s|$)/i],
+    ['タイマン', /(^|\s)(タイマン|1対1)(?=\s|$)/i],
+    ['2PL', /(^|\s)(2PL|2人)(?=\s|$)/i],
+    ['3PL', /(^|\s)(3PL|3人)(?=\s|$)/i],
+    ['4PL', /(^|\s)(4PL|4人)(?=\s|$)/i],
+    ['5PL', /(^|\s)(5PL|5人)(?=\s|$)/i],
+    ['6PL', /(^|\s)(6PL|6人)(?=\s|$)/i],
+    ['人数融通有', /人数\s*融通\s*(有|あり|可)|(^|\s)(融通有|人数融通)(?=\s|$)/i]
+  ];
+  return aliases.filter(([, pattern]) => pattern.test(text)).map(([name]) => name);
+}
+
+function getPlayerColumnValues(record) {
+  const combinedAliases = ['人数', 'プレイ人数', 'PL人数', '対応人数', '人数区分', 'プレイヤー人数', 'プレイ可能人数'];
+  const combinedColumn = findCsvColumn(record, combinedAliases);
+  if (combinedColumn !== undefined) {
+    const parsed = parsePlayerTypes(record[combinedColumn]);
+    if (parsed.length) return { provided: true, value: parsed.join('、') };
+  }
+  // 人数ごとに列が分かれているチェックボックス形式にも対応
+  const playerColumnAliases = {
+    'ソロ': ['ソロ', 'ソロ可', '1PL'],
+    'タイマン': ['タイマン', 'タイマン可'],
+    '2PL': ['2PL', '2PL可'],
+    '3PL': ['3PL', '3PL可'],
+    '4PL': ['4PL', '4PL可'],
+    '5PL': ['5PL', '5PL可'],
+    '6PL': ['6PL', '6PL可'],
+    '人数融通有': ['人数融通有', '人数融通あり', '人数融通可', '融通有']
+  };
+  const selected = [];
+  let provided = false;
+  for (const [option, aliases] of Object.entries(playerColumnAliases)) {
+    const key = findCsvColumn(record, aliases);
+    if (key === undefined) continue;
+    provided = true;
+    if (parseChecked(record[key]) === true) selected.push(option);
+  }
+  return { provided, value: selected.join('、') };
 }
 
 function csvToScenario(record) {
-  const title = String(findCsvValue(record, ['シナリオ名', 'タイトル', 'シナリオ', 'title'])).trim();
+  const title = String(findCsvValue(record, ['シナリオ名', 'タイトル', 'シナリオ', '作品名', 'title', 'name'])).trim();
   if (!title) return null;
-  const kanaValue = String(findCsvValue(record, ['かな', '読み', 'よみ', '頭文字'])).trim();
-  const state = String(findCsvValue(record, ['状態', 'プレイ状態', 'ステータス']));
-  const kpCell = findCsvValue(record, ['KP済', 'KP', 'KP済み']);
-  const plCell = findCsvValue(record, ['PL済', 'PL', 'PL済み']);
-  const readCell = String(findCsvValue(record, ['既読未読', '既読状態', '読書状態', '既読']));
-  const rCell = String(findCsvValue(record, ['R指定', 'R', '年齢制限']));
-  const paidCell = findCsvValue(record, ['有償', '有', '有料']);
-  const hasPaidColumn = Object.keys(record).some((key) => ['有償','有','有料'].includes(headerKey(key)));
-  const players = String(findCsvValue(record, ['人数', 'プレイ人数', 'PL人数'])).trim();
-  const location = String(findCsvValue(record, ['シナリオ場所', 'URL', 'リンク', '配布先'])).trim();
-  const author = String(findCsvValue(record, ['作者名', '作者', '作成者', '著者'])).trim();
-  const memo = String(findCsvValue(record, ['メモ', '備考', 'コメント'])).trim();
-  const hasRColumn = hasCsvColumn(record, ['R指定', 'R', '年齢制限']);
-  const hasReadColumn = hasCsvColumn(record, ['既読未読', '既読状態', '読書状態', '既読']) || hasCsvColumn(record, ['状態', 'プレイ状態', 'ステータス']);
-  const hasKpColumn = hasCsvColumn(record, ['KP済', 'KP', 'KP済み']) || hasReadColumn;
-  const hasPlColumn = hasCsvColumn(record, ['PL済', 'PL', 'PL済み']) || hasReadColumn;
-  const hasPlayersColumn = hasCsvColumn(record, ['人数', 'プレイ人数', 'PL人数']);
-  const hasLocationColumn = hasCsvColumn(record, ['シナリオ場所', 'URL', 'リンク', '配布先']);
-  const hasAuthorColumn = hasCsvColumn(record, ['作者名', '作者', '作成者', '著者']);
-  const hasMemoColumn = hasCsvColumn(record, ['メモ', '備考', 'コメント']);
-  const rText = String(rCell).trim();
+
+  const kanaAliases = ['かな', '読み', 'よみ', '頭文字', '読み仮名'];
+  const stateAliases = ['状態', 'プレイ状態', 'ステータス'];
+  const kpAliases = ['KP済', 'KP', 'KP済み', 'KP経験', 'KP実施'];
+  const plAliases = ['PL済', 'PL', 'PL済み', 'PL経験', 'PL実施'];
+  const readAliases = ['既読未読', '既読状態', '読書状態', '既読', '読了状態'];
+  const rAliases = ['R指定', 'R', '年齢制限', 'R18', 'レーティング'];
+  const paidAliases = ['有償', '有', '有料', '価格区分', '頒布形態'];
+  const urlAliases = ['シナリオ場所', 'URL', 'リンク', '配布先', '公開先', '配布URL', '販売URL'];
+  const circleAliases = ['サークル名', 'サークル', '頒布元', '発行元', 'circle', 'circle name', '作者名', '作者', '作成者', '著者'];
+  const memoAliases = ['メモ', '備考', 'コメント'];
+
+  const kana = String(findCsvValue(record, kanaAliases)).trim();
+  const state = String(findCsvValue(record, stateAliases)).trim();
+  const kpValue = findCsvValue(record, kpAliases);
+  const plValue = findCsvValue(record, plAliases);
+  const readValue = String(findCsvValue(record, readAliases)).trim();
+  const rValue = String(findCsvValue(record, rAliases)).trim();
+  const paidValue = String(findCsvValue(record, paidAliases)).trim();
+  const players = getPlayerColumnValues(record);
+  const circle = String(findCsvValue(record, circleAliases)).trim();
+  const url = String(findCsvValue(record, urlAliases)).trim();
+  const memo = String(findCsvValue(record, memoAliases)).trim();
+
   let rRating = '未確認';
-  if (hasRColumn) rRating = !rText || /なし|対象外|false|no|^0$|不要/i.test(rText) ? 'なし' : (parseChecked(rText) || /r.?18|r.?15|あり/i.test(rText) ? 'あり' : '未確認');
-  const readStatus = /未読/.test(readCell) || /未読/.test(state) ? '未読' : (/既読/.test(readCell) || /既読/.test(state) ? '既読' : '未読');
-  const readingInitial = Array.from(kanaValue || '他')[0] || '他';
+  if (hasCsvColumn(record, rAliases)) {
+    if (/なし|対象外|false|no|^0$|不要|×|✕/i.test(rValue) || parseChecked(rValue) === false) rRating = 'なし';
+    else if (parseChecked(rValue) === true || /r.?18|r.?15|あり/i.test(rValue)) rRating = 'あり';
+  }
+  let paidStatus = '未確認';
+  if (hasCsvColumn(record, paidAliases)) {
+    if (/無償|無料|なし|false|no|^0$|×|✕/i.test(paidValue) || parseChecked(paidValue) === false) paidStatus = '無償';
+    else if (/有償|有料|販売|頒布|true|yes|^1$|^有$/i.test(paidValue) || parseChecked(paidValue) === true) paidStatus = '有償';
+  }
+  const readStatus = /未読/.test(readValue) || /未読/.test(state) ? '未読' : (/既読/.test(readValue) || /既読/.test(state) ? '既読' : '未読');
+  const kpColumnPresent = hasCsvColumn(record, kpAliases);
+  const plColumnPresent = hasCsvColumn(record, plAliases);
+  const stateHasKp = /KP済/.test(state);
+  const stateHasPl = /PL済/.test(state);
+  const kpChecked = parseChecked(kpValue);
+  const plChecked = parseChecked(plValue);
+
   return {
     title,
-    reading_initial: readingInitial,
-    player_count: players,
+    reading_initial: Array.from(kana || '他')[0] || '他',
+    player_count: players.value,
     r_rating: rRating,
-    paid_status: hasPaidColumn ? (parseChecked(paidCell) ? '有償' : '無償') : '未確認',
+    paid_status: paidStatus,
     read_status: readStatus,
-    kp_done: parseChecked(kpCell) || /KP済/.test(state),
-    pl_done: parseChecked(plCell) || /PL済/.test(state),
-    url: location,
-    author_name: author,
+    kp_done: kpChecked === true || stateHasKp,
+    pl_done: plChecked === true || stateHasPl,
+    url,
+    author_name: circle,
     memo,
     __provided: {
-      reading_initial: hasCsvColumn(record, ['かな', '読み', 'よみ', '頭文字']),
-      player_count: hasPlayersColumn,
-      r_rating: hasRColumn,
-      paid_status: hasPaidColumn,
-      read_status: hasReadColumn,
-      kp_done: hasKpColumn,
-      pl_done: hasPlColumn,
-      url: hasLocationColumn,
-      author_name: hasAuthorColumn,
-      memo: hasMemoColumn
+      reading_initial: hasCsvColumn(record, kanaAliases) && !!kana,
+      player_count: players.provided,
+      r_rating: hasCsvColumn(record, rAliases) && rRating !== '未確認',
+      paid_status: hasCsvColumn(record, paidAliases) && paidStatus !== '未確認',
+      read_status: (hasCsvColumn(record, readAliases) && !!readValue) || /既読|未読/.test(state),
+      kp_done: (kpColumnPresent && kpChecked !== null) || stateHasKp || /KP済/.test(state),
+      pl_done: (plColumnPresent && plChecked !== null) || stateHasPl || /PL済/.test(state),
+      url: hasCsvColumn(record, urlAliases) && !!url,
+      author_name: hasCsvColumn(record, circleAliases) && !!circle,
+      memo: hasCsvColumn(record, memoAliases) && !!memo
     }
   };
 }
@@ -650,12 +747,14 @@ async function importCsvFile(event) {
     const rows = parseCsvText(await file.text());
     if (rows.length < 2) throw new Error('CSVにデータ行がありません。');
     const headers = rows[0].map((value) => value.trim());
-    if (!headers.some((header) => ['シナリオ名','タイトル','title'].includes(headerKey(header)))) {
-      throw new Error('「シナリオ名」または「タイトル」列が見つかりません。');
+    const headerRecord = Object.fromEntries(headers.map((header) => [header, '']));
+    if (!hasCsvColumn(headerRecord, ['シナリオ名', 'タイトル', 'シナリオ', '作品名', 'title', 'name'])) {
+      throw new Error('シナリオ名に相当する列が見つかりません。列名を「シナリオ名」または「タイトル」にしてください。');
     }
     const dataRows = rows.slice(1).map((cells) => Object.fromEntries(headers.map((header, index) => [header, cells[index] ?? ''])));
     const imported = dataRows.map(csvToScenario).filter(Boolean);
     if (!imported.length) throw new Error('取り込めるシナリオ名がありませんでした。');
+
     const { data: existing, error: fetchError } = await supabase.from(TABLE).select('*').eq('user_id', currentUser.id).range(0, 4999);
     if (fetchError) throw fetchError;
     const byTitle = new Map();
@@ -672,19 +771,19 @@ async function importCsvFile(event) {
       if (matches.length === 1) {
         const old = matches[0];
         const updates = {};
-        for (const field of ['reading_initial','player_count','r_rating','paid_status','read_status','kp_done','pl_done','url','author_name','memo']) {
+        for (const field of ['reading_initial', 'player_count', 'r_rating', 'paid_status', 'read_status', 'kp_done', 'pl_done', 'url', 'author_name', 'memo']) {
           const value = item[field];
-          if (item.__provided[field] && value !== '' && value !== null && value !== undefined && !(field === 'r_rating' && value === '未確認') && !(field === 'paid_status' && value === '未確認')) updates[field] = value;
+          if (item.__provided[field] && value !== '' && value !== null && value !== undefined) updates[field] = value;
         }
-        const { error } = await supabase.from(TABLE).update(updates).eq('id', old.id).eq('user_id', currentUser.id);
-        if (error) throw error;
-        updated++;
+        if (Object.keys(updates).length) {
+          const { error } = await supabase.from(TABLE).update(updates).eq('id', old.id).eq('user_id', currentUser.id);
+          if (error) throw error;
+          updated++;
+        }
       } else {
         if (matches.length > 1) ambiguous++;
         const folderKey = `csv/${crypto.randomUUID()}`;
-        const { __provided, ...importFields } = item;
-        const { error } = await supabase.from(TABLE).insert({
-          ...importFields,
+        const payload = {
           user_id: currentUser.id,
           folder_key: folderKey,
           category_code: '99',
@@ -692,14 +791,25 @@ async function importCsvFile(event) {
           folder_name: item.title,
           relative_path: 'CSV取り込み（フォルダ未紐付け）',
           folder_exists: false,
+          title: item.title,
           is_favorite: false
-        });
+        };
+        for (const field of ['reading_initial', 'player_count', 'r_rating', 'paid_status', 'read_status', 'kp_done', 'pl_done', 'url', 'author_name', 'memo']) {
+          if (item.__provided[field]) payload[field] = item[field];
+        }
+        const { error } = await supabase.from(TABLE).insert(payload);
         if (error) throw error;
         created++;
       }
     }
     await loadScenarios();
-    setNotice(`CSV取り込み完了：既存データ更新 ${updated}件、新規登録 ${created}件。次回スキャン時、未分類データとフォルダ名が一致すれば紐付けます。${ambiguous ? ` 同名の既存データが複数あるため、新規登録にしたものが${ambiguous}件あります。` : ''}`);
+    const presentLabels = [];
+    if (hasCsvColumn(headerRecord, ['人数', 'プレイ人数', 'PL人数', '対応人数', '人数区分', 'プレイヤー人数', 'プレイ可能人数']) || ['ソロ', 'タイマン', '2PL', '3PL', '4PL', '5PL', '6PL', '人数融通有'].some((key) => hasCsvColumn(headerRecord, [key]))) presentLabels.push('人数');
+    if (hasCsvColumn(headerRecord, ['R指定', 'R', '年齢制限', 'R18', 'レーティング'])) presentLabels.push('R指定');
+    if (hasCsvColumn(headerRecord, ['有償', '有', '有料', '価格区分', '頒布形態'])) presentLabels.push('有償・無償');
+    if (hasCsvColumn(headerRecord, ['サークル名', 'サークル', '頒布元', '発行元', 'circle', 'circle name', '作者名', '作者', '作成者', '著者'])) presentLabels.push('サークル名');
+    const optionalNote = presentLabels.length ? ` 認識した任意項目：${presentLabels.join('・')}。` : ' 人数・R指定・有償・サークル名などの任意列は見つからなかったため、既存情報を変更していません。';
+    setNotice(`CSV取り込み完了：既存データ更新 ${updated}件、新規登録 ${created}件。列のない項目は空欄で上書きせず、既存情報を保持します。${optionalNote}${ambiguous ? ` 同名の既存データが複数あるため、新規登録にしたものが${ambiguous}件あります。` : ''}`);
     showToast('CSVを取り込みました');
   } catch (error) {
     setNotice(`CSV取り込みに失敗しました：${error.message}`, 'warn');

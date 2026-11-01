@@ -3,3 +3,10 @@
 @media(max-width:1100px){.scenario-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.topbar{gap:15px;padding:0 15px}.top-search{max-width:340px}}
 @media(max-width:760px){.topbar{height:auto;min-height:58px;flex-wrap:wrap;padding:10px 13px;gap:9px}.brand{font-size:13px}.top-search{order:3;flex-basis:100%;max-width:none;height:36px}.top-search kbd{display:none}.top-actions{gap:6px}.top-actions #choose-folder-btn,.top-actions select{display:none}.top-actions .btn{font-size:11px}.layout{display:block;min-height:calc(100vh - 108px)}.sidebar{display:none;border-right:0;border-bottom:1px solid var(--line);padding:15px;gap:15px}.mobile-toolbar{display:flex;align-items:center;gap:10px;padding:9px 13px;border-bottom:1px solid var(--line);background:#1b1e23}.mobile-toolbar .muted{margin-right:auto}.main-content{padding:19px 13px 35px}.page-heading{align-items:flex-start;margin-bottom:15px}.page-heading h1{font-size:19px}.page-heading .eyebrow{font-size:8px}.view-actions{gap:5px}.view-actions .btn{font-size:10px;padding:7px}.scenario-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.card-cover{height:112px}.card-content{padding:9px}.card-title{font-size:12px}.card-meta{font-size:9px}.card-author{font-size:10px}.card-footer{font-size:9px}.detail-grid{grid-template-columns:1fr}.detail-body{padding:15px}.dialog-head{padding:16px}.empty-state{padding:38px 15px}.sidebar-footer{margin-top:0}}
 @media(max-width:390px){.scenario-grid{grid-template-columns:1fr 1fr}.card-cover{height:94px}.view-actions #export-btn{display:none}.top-actions #scan-btn{display:none}}
+
+/* v4: 複数選択式の人数入力と一覧表示 */
+.player-choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 14px;padding:10px 12px;border:1px solid #3b424c;border-radius:6px;background:#191c21;color:#cbd0d6;font-size:12px}
+.player-choice-grid label{display:flex;align-items:center;gap:8px;cursor:pointer}
+.player-choice-grid input{accent-color:#9db4a4}
+.card-player-types{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px;min-height:18px}
+.chip.player{border-color:#3f5148;color:#c4d8cc;background:#29372f}

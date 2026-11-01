@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#17191d">
   <title>TRPG Archive</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <div id="auth-screen" class="auth-screen">
@@ -33,7 +33,7 @@
   <div id="app" class="app-shell hidden">
     <header class="topbar">
       <div class="brand"><span class="brand-mark small">▥</span><span>TRPG Archive</span></div>
-      <div class="top-search"><span>⌕</span><input id="search" type="search" placeholder="タイトル・作者名で検索" aria-label="タイトル・作者名で検索"><kbd>Ctrl K</kbd></div>
+      <div class="top-search"><span>⌕</span><input id="search" type="search" placeholder="タイトル・サークル名で検索" aria-label="タイトル・サークル名で検索"><kbd>Ctrl K</kbd></div>
       <div class="top-actions">
         <button id="choose-folder-btn" class="btn secondary compact">フォルダを選択</button>
         <button id="scan-btn" class="btn primary compact" disabled>再スキャン</button>
@@ -72,10 +72,13 @@
           <div class="side-heading">人数</div>
           <div class="filter-options">
             <label><input type="checkbox" name="players" value="ソロ"> ソロ</label>
+            <label><input type="checkbox" name="players" value="タイマン"> タイマン</label>
             <label><input type="checkbox" name="players" value="2PL"> 2PL</label>
             <label><input type="checkbox" name="players" value="3PL"> 3PL</label>
             <label><input type="checkbox" name="players" value="4PL"> 4PL</label>
-            <label><input type="checkbox" name="players" value="5PL以上"> 5PL以上</label>
+            <label><input type="checkbox" name="players" value="5PL"> 5PL</label>
+            <label><input type="checkbox" name="players" value="6PL"> 6PL</label>
+            <label><input type="checkbox" name="players" value="人数融通有"> 人数融通有</label>
           </div>
         </section>
         <section class="side-section">
@@ -128,11 +131,23 @@
     <div class="detail-body">
       <div id="detail-path" class="path-text"></div>
       <div class="detail-grid">
-        <div class="field"><label for="edit-players">人数</label><input id="edit-players" placeholder="例：2PL、2～4PL"></div>
+        <div class="field">
+          <label>人数（複数選択可）</label>
+          <div class="player-choice-grid">
+            <label><input type="checkbox" name="edit-players" value="ソロ"> ソロ</label>
+            <label><input type="checkbox" name="edit-players" value="タイマン"> タイマン</label>
+            <label><input type="checkbox" name="edit-players" value="2PL"> 2PL</label>
+            <label><input type="checkbox" name="edit-players" value="3PL"> 3PL</label>
+            <label><input type="checkbox" name="edit-players" value="4PL"> 4PL</label>
+            <label><input type="checkbox" name="edit-players" value="5PL"> 5PL</label>
+            <label><input type="checkbox" name="edit-players" value="6PL"> 6PL</label>
+            <label><input type="checkbox" name="edit-players" value="人数融通有"> 人数融通有</label>
+          </div>
+        </div>
         <div class="field"><label for="edit-r18">R指定</label><select id="edit-r18"><option>未確認</option><option>なし</option><option>あり</option></select></div>
         <div class="field"><label for="edit-paid">価格</label><select id="edit-paid"><option>未確認</option><option>無償</option><option>有償</option></select></div>
         <div class="field"><label for="edit-read">既読状態</label><select id="edit-read"><option>未読</option><option>既読</option></select></div>
-        <div class="field"><label for="edit-author">作者名（後から追加可能）</label><input id="edit-author" placeholder="作者名"></div>
+        <div class="field"><label for="edit-author">サークル名</label><input id="edit-author" placeholder="サークル名"></div>
         <div class="field"><label for="edit-url">シナリオ場所 / URL</label><input id="edit-url" type="text" placeholder="URL・非公開・配布先など"></div>
       </div>
       <div class="toggle-row">
@@ -148,6 +163,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="config.js"></script>
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=4"></script>
 </body>
 </html>
