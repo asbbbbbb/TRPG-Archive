@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#17191d">
+  <title>TRPG Archive</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="auth-screen" class="auth-screen">
+    <section class="auth-card">
+      <div class="brand-mark">▥</div>
+      <h1>TRPG Archive</h1>
+      <p class="muted">シナリオライブラリ</p>
+      <div class="field">
+        <label for="auth-email">メールアドレス</label>
+        <input id="auth-email" type="email" autocomplete="email" placeholder="you@example.com">
+      </div>
+      <div class="field">
+        <label for="auth-password">パスワード</label>
+        <input id="auth-password" type="password" autocomplete="current-password" placeholder="パスワード">
+      </div>
+      <div class="auth-actions">
+        <button id="login-btn" class="btn primary">ログイン</button>
+        <button id="signup-btn" class="btn secondary">新規登録</button>
+      </div>
+      <p id="auth-message" class="message" aria-live="polite"></p>
+      <p class="fine-print">このアプリはSupabaseの認証とデータベースを利用します。</p>
+    </section>
+  </div>
+
+  <div id="app" class="app-shell hidden">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark small">▥</span><span>TRPG Archive</span></div>
+      <div class="top-search"><span>⌕</span><input id="search" type="search" placeholder="タイトル・作者名で検索" aria-label="タイトル・作者名で検索"><kbd>Ctrl K</kbd></div>
+      <div class="top-actions">
+        <button id="choose-folder-btn" class="btn secondary compact">フォルダを選択</button>
+        <button id="scan-btn" class="btn primary compact" disabled>再スキャン</button>
+        <select id="sort-select" aria-label="並び順">
+          <option value="title">名前順</option>
+          <option value="category">分類順</option>
+          <option value="newest">更新順</option>
+          <option value="players">人数順</option>
+        </select>
+        <button id="logout-btn" class="icon-btn" title="ログアウト" aria-label="ログアウト">↪</button>
+      </div>
+    </header>
+
+    <div class="mobile-toolbar">
+      <button id="mobile-filter-toggle" class="btn secondary compact">☷ フィルター</button>
+      <span id="mobile-count" class="muted small-text">0件</span>
+      <button id="mobile-scan-btn" class="btn primary compact" disabled>再スキャン</button>
+    </div>
+
+    <div class="layout">
+      <aside id="sidebar" class="sidebar">
+        <section class="side-section">
+          <div class="side-heading">ライブラリ</div>
+          <button class="filter-link active" data-filter="all"><span>▦</span> すべて <b id="count-all">0</b></button>
+          <button class="filter-link" data-filter="favorite"><span>☆</span> お気に入り <b id="count-favorite">0</b></button>
+          <button class="filter-link" data-filter="kp"><span>✓</span> KP済み <b id="count-kp">0</b></button>
+          <button class="filter-link" data-filter="pl"><span>✓</span> PL済み <b id="count-pl">0</b></button>
+          <button class="filter-link" data-filter="unread"><span>○</span> 未読 <b id="count-unread">0</b></button>
+          <button class="filter-link" data-filter="missing"><span>!</span> フォルダ未検出 <b id="count-missing">0</b></button>
+        </section>
+        <section class="side-section">
+          <div class="side-heading">大分類</div>
+          <div id="category-filters"></div>
+        </section>
+        <section class="side-section">
+          <div class="side-heading">人数</div>
+          <div class="filter-options">
+            <label><input type="checkbox" name="players" value="ソロ"> ソロ</label>
+            <label><input type="checkbox" name="players" value="2PL"> 2PL</label>
+            <label><input type="checkbox" name="players" value="3PL"> 3PL</label>
+            <label><input type="checkbox" name="players" value="4PL"> 4PL</label>
+            <label><input type="checkbox" name="players" value="5PL以上"> 5PL以上</label>
+          </div>
+        </section>
+        <section class="side-section">
+          <div class="side-heading">その他</div>
+          <div class="filter-options">
+            <label><input type="checkbox" id="filter-r18"> R指定あり</label>
+            <label><input type="checkbox" id="filter-paid"> 有償</label>
+            <label><input type="checkbox" id="filter-unread"> 未確認の情報あり</label>
+          </div>
+        </section>
+        <div class="sidebar-footer">
+          <div id="folder-state" class="folder-state">監視フォルダ：未設定</div>
+          <p>フォルダはPCのChrome / Edgeで選択してください。</p>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <div class="page-heading">
+          <div>
+            <div class="eyebrow">YOUR LIBRARY</div>
+            <h1 id="page-title">すべてのシナリオ</h1>
+            <p id="page-subtitle" class="muted">フォルダを選択してシナリオを読み込みます。</p>
+          </div>
+          <div class="view-actions">
+            <button id="import-csv-btn" class="btn secondary compact">CSV取り込み</button>
+            <input id="csv-file" type="file" accept=".csv,text/csv" class="hidden">
+            <button id="export-btn" class="btn secondary compact">JSON書き出し</button>
+            <button id="refresh-btn" class="icon-btn" title="一覧を更新" aria-label="一覧を更新">↻</button>
+          </div>
+        </div>
+        <div id="notice" class="notice hidden" role="status"></div>
+        <div id="progress-wrap" class="progress-wrap hidden"><div id="progress-bar" class="progress-bar"></div></div>
+        <div id="empty-state" class="empty-state">
+          <div class="empty-icon">▧</div>
+          <h2>シナリオフォルダを読み込む</h2>
+          <p>最上位のフォルダ（00_公式シナリオ ～ 05_企画が入っているフォルダ）を選択してください。</p>
+          <button id="empty-choose-btn" class="btn primary">監視フォルダを選択</button>
+          <p class="fine-print">フォルダ名から分類・かな・タイトルを自動判別します。</p>
+        </div>
+        <div id="scenario-grid" class="scenario-grid"></div>
+        <div id="no-results" class="empty-state compact-empty hidden">
+          <div class="empty-icon">⌕</div><h2>該当するシナリオがありません</h2><p>検索条件やフィルターを変更してください。</p>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="detail-dialog" class="detail-dialog">
+    <form method="dialog" class="dialog-head"><div><div class="eyebrow">SCENARIO DETAILS</div><h2 id="detail-title">シナリオ詳細</h2></div><button class="icon-btn" aria-label="閉じる">×</button></form>
+    <div class="detail-body">
+      <div id="detail-path" class="path-text"></div>
+      <div class="detail-grid">
+        <div class="field"><label for="edit-players">人数</label><input id="edit-players" placeholder="例：2PL、2～4PL"></div>
+        <div class="field"><label for="edit-r18">R指定</label><select id="edit-r18"><option>未確認</option><option>なし</option><option>あり</option></select></div>
+        <div class="field"><label for="edit-paid">価格</label><select id="edit-paid"><option>未確認</option><option>無償</option><option>有償</option></select></div>
+        <div class="field"><label for="edit-read">既読状態</label><select id="edit-read"><option>未読</option><option>既読</option></select></div>
+        <div class="field"><label for="edit-author">作者名（後から追加可能）</label><input id="edit-author" placeholder="作者名"></div>
+        <div class="field"><label for="edit-url">シナリオ場所 / URL</label><input id="edit-url" type="text" placeholder="URL・非公開・配布先など"></div>
+      </div>
+      <div class="toggle-row">
+        <label><input id="edit-kp" type="checkbox"> KP済み</label>
+        <label><input id="edit-pl" type="checkbox"> PL済み</label>
+        <label><input id="edit-favorite" type="checkbox"> お気に入り</label>
+      </div>
+      <div class="field"><label for="edit-memo">メモ</label><textarea id="edit-memo" rows="4" placeholder="自由記入"></textarea></div>
+      <div class="detail-actions"><button id="save-detail-btn" type="button" class="btn primary">変更を保存</button><button id="open-folder-btn" type="button" class="btn secondary">保存場所をコピー</button></div>
+      <p id="detail-message" class="message" aria-live="polite"></p>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="config.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
